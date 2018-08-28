@@ -1,0 +1,206 @@
+
+
+Http Server Configuration
+Install Httpd Server : sudo yum install httpd
+
+In the Httpd Configuration at /etc/httpd/conf/httpd.conf 
+add below 2 lines
+
+ServerName work-node1
+ServerName localhost
+
+
+Add the server details to the /etc/hosts file as
+172.16.202.96   work-node1      work-node1
+172.16.202.97   work-node2      work-node2
+
+
+Enable the Http Service and start
+systemctl enable httpd.service
+sudo systemctl start httpd.service
+-----------------------
+Install MariaDB
+
+sudo yum install mariadb-server mariadb
+sudo systemctl start mariadb
+sudo mysql_secure_installation
+
+
+Press enter if that asks for password which will then ask to enter new password
+for all other questions press enter
+
+Start the Service
+sudo systemctl enable mariadb.service
+
+------------------------
+Install PHP
+
+sudo yum install php php-mysql
+sudo systemctl restart httpd.service
+
+Install php packages
+yum search php-
+
+
+Test PHP Processing on your Web Server
+sudo vi /var/www/html/info.php
+<?php phpinfo(); ?>
+
+Check the php using : http://your_server_IP_address/info.php
+
+---------------------------------
+Install nagios 4
+
+Install Pre-requsites
+sudo yum install gcc glibc glibc-common gd gd-devel make net-snmp openssl-devel xinetd unzip
+
+Creates Users and Groups
+sudo useradd nagios
+sudo groupadd nagcmd
+sudo usermod -a -G nagcmd nagios
+
+Download Nagios Core
+curl -L -O https://assets.nagios.com/downloads/nagioscore/releases/nagios-4.1.1.tar.gz
+tar xvf nagios-*
+cd nagios-*
+./configure --with-command-group=nagcmd 
+make all
+
+Run the below scripts to install Nagios, init scripts, and sample configuration files:
+sudo make install
+sudo make install-commandmode
+sudo make install-init
+sudo make install-config
+sudo make install-webconf
+
+In order to issue external commands via the web interface to Nagios, we must add the web server user, apache, to the nagcmd group
+sudo usermod -G nagcmd apache
+
+Install Nagios Plugins
+curl -L -O http://nagios-plugins.org/download/nagios-plugins-2.1.1.tar.gz
+tar xvf nagios-plugins
+cd nagios-plugins
+./configure --with-nagios-user=nagios --with-nagios-group=nagios --with-openssl
+make 
+sudo make install
+
+
+Install NRPE
+curl -L -O http://downloads.sourceforge.net/project/nagios/nrpe-2.x/nrpe-2.15/nrpe-2.15.tar.gz
+tar xvf nrpe-*.tar.gz
+cd nrpe-*
+./configure --enable-command-args --with-nagios-user=nagios --with-nagios-group=nagios --with-ssl=/usr/bin/openssl --with-ssl-lib=/usr/lib/x86_64-linux-gnu
+
+make all
+sudo make install
+sudo make install-xinetd
+sudo make install-daemon-config
+
+sudo vi /etc/xinetd.d/nrpe
+Change only_from element to 
+only_from       = 127.0.0.1 172.16.202.96
+
+
+sudo service xinetd restart
+
+----------------------------------
+COnfigure Nagios
+
+sudo vi /usr/local/nagios/etc/nagios.cfg
+un comment #cfg_dir
+
+sudo mkdir /usr/local/nagios/etc/servers
+
+
+Configure check_nrpe Command
+sudo vi /usr/local/nagios/etc/objects/commands.cfg
+	
+Add the below lines
+define command{
+        command_name check_nrpe
+        command_line $USER1$/check_nrpe -H $HOSTADDRESS$ -c $ARG1$
+}
+
+
+Configure Apache
+sudo htpasswd -c /usr/local/nagios/etc/htpasswd.users nagiosadmin
+sudo systemctl daemon-reload
+sudo systemctl start nagios.service
+sudo systemctl restart httpd.service
+sudo chkconfig nagios on
+
+
+
+Restrict Access by IP Address
+sudo vi /etc/httpd/conf.d/nagios.conf
+Comment these 2 lines
+Order allow,deny
+Allow from all
+
+Uncomment these 3 lines
+#  Order deny,allow
+#  Deny from all
+#  Allow from 127.0.0.1
+
+sudo systemctl restart nagios.service
+sudo systemctl restart httpd.service
+-----------------------------
+Access the nagios using
+http://nagios_server_public_ip/nagios
+
+
+
+
+
+
+On the Second Centos Machine
+sudo yum install epel-release
+sudo yum install nrpe nagios-plugins-all
+sudo vi /etc/nagios/nrpe.cfg, add allowed hosts as
+allowed_hosts=127.0.0.1,::1,172.16.202.96
+
+sudo systemctl start nrpe.service
+sudo systemctl enable nrpe.service
+
+
+
+Add Host to Nagios Configuration
+sudo vi /usr/local/nagios/etc/servers/yourhost.cfg
+
+define host {
+        use                             linux-server
+        host_name                       yourhost
+        alias                           My first Apache server
+        address                         172.16.202.97
+        max_check_attempts              5
+        check_period                    24x7
+        notification_interval           30
+        notification_period             24x7
+}
+
+define service {
+        use                             generic-service
+        host_name                       yourhost
+        service_description             PING
+        check_command                   check_ping!100.0,20%!500.0,60%
+}
+
+sudo systemctl reload nagios.service
+
+-------------------------
+
+Check for Http Port
+
+define service {
+        use                             generic-service
+        host_name                       yourhost
+        service_description             HTTP
+        check_command                   check_http
+        check_interval                  1
+        _port_number                    8080
+        }
+
+define command{
+    command_name check_http 
+    command_line $USER1$/check_http -I $HOSTADDRESS$ -p $_SERVICEport_number$ $ARG1$ 
+}
